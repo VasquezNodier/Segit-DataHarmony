@@ -3,11 +3,14 @@
 import { useState } from "react";
 import { FileText, ExternalLink, X, Trash2, Paperclip, FileSpreadsheet, File } from "lucide-react";
 import type { DQDocument } from "@/lib/api/data-quality";
+import type { DrillingDocument } from "@/lib/api/drilling";
+
+type DocumentLike = DQDocument | DrillingDocument;
 
 interface DocumentationCardProps {
-  document: DQDocument;
+  document: DocumentLike;
   onDelete: (id: string) => void;
-  onViewFile?: (doc: DQDocument) => void;
+  onViewFile?: (doc: DocumentLike) => void;
 }
 
 const EXT_COLORS: Record<string, string> = {
