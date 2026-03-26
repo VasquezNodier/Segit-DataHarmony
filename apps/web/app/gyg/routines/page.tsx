@@ -100,11 +100,11 @@ export default function GygRoutinesPage() {
                 Geology & Geophysics
               </Link>
               <span className="mx-1">/</span>
-              <span className="text-slate-700">Rutinas</span>
+              <span className="text-slate-700">Routines</span>
             </nav>
-            <h1 className="text-2xl font-semibold text-slate-800">Rutinas</h1>
+            <h1 className="text-2xl font-semibold text-slate-800">Routines</h1>
             <p className="mt-1 text-sm text-slate-500">
-              Catálogo de rutinas ejecutables para Geology & Geophysics
+              Catalog of operational routines for Geology &amp; Geophysics.
             </p>
           </div>
         </div>

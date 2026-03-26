@@ -71,8 +71,7 @@ export default function GeologyGeophysicsPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">Geology &amp; Geophysics</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Rutinas operacionales, scripts, aplicaciones y documentación para Geology &amp;
-            Geophysics.
+            Operational routines, scripts, applications and documentation for Geology &amp; Geophysics.
           </p>
         </div>
       </div>
@@ -85,9 +84,9 @@ export default function GeologyGeophysicsPage() {
               <Play className="h-5 w-5" aria-hidden />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-slate-800">Rutinas ejecutables</h2>
+              <h2 className="text-sm font-semibold text-slate-800">Executable routines</h2>
               <p className="text-xs text-slate-500">
-                Catálogo de rutinas ejecutables para Geology &amp; Geophysics.
+                Catalog of operational routines for Geology &amp; Geophysics.
               </p>
             </div>
           </div>

@@ -35,7 +35,7 @@ export const navigation: (NavItem | NavGroup)[] = [
     icon: Layers,
     children: [
       { label: "Geology & Geophysics", href: "/gyg", icon: Layers },
-      { label: "Rutinas", href: "/gyg/routines", icon: Play },
+      { label: "Routines", href: "/gyg/routines", icon: Play },
       { label: "Settings", href: "/settings", icon: Settings },
     ],
   },
