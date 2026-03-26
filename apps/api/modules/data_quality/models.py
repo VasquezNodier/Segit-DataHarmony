@@ -10,6 +10,7 @@ from shared.base_model import Base, UUIDMixin, TimestampMixin
 
 MODULE_DATA_QUALITY = "data_quality"
 MODULE_GEOLOGY_GEOPHYSICS = "geology_geophysics"
+MODULE_DRILLING = "drilling"
 
 
 class AppScript(Base, UUIDMixin, TimestampMixin):
