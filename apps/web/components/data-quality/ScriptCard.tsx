@@ -2,11 +2,14 @@
 
 import { FileCode2, Database, Terminal, Eye, Pencil, Trash2 } from "lucide-react";
 import type { DQScript } from "@/lib/api/data-quality";
+import type { DrillingScript } from "@/lib/api/drilling";
+
+type ScriptLike = DQScript | DrillingScript;
 
 interface ScriptCardProps {
-  script: DQScript;
-  onView: (script: DQScript) => void;
-  onEdit: (script: DQScript) => void;
+  script: ScriptLike;
+  onView: (script: ScriptLike) => void;
+  onEdit: (script: ScriptLike) => void;
   onDelete: (id: string) => void;
 }
 

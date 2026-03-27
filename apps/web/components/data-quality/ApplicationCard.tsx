@@ -2,9 +2,12 @@
 
 import { ExternalLink, Globe, Trash2 } from "lucide-react";
 import type { DQApplication } from "@/lib/api/data-quality";
+import type { DrillingApplication } from "@/lib/api/drilling";
+
+type ApplicationLike = DQApplication | DrillingApplication;
 
 interface ApplicationCardProps {
-  application: DQApplication;
+  application: ApplicationLike;
   onDelete: (id: string) => void;
 }
 

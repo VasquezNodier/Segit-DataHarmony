@@ -14,6 +14,7 @@ import {
   Info,
 } from "lucide-react";
 import type { DQDocument } from "@/lib/api/data-quality";
+import type { DrillingDocument } from "@/lib/api/drilling";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -128,8 +129,8 @@ export default function DocViewerPanel({
   const [activeSheet, setActiveSheet] = useState(0);
   const backdropRef = useRef<HTMLDivElement>(null);
 
-  const fileUrl = `/api/data-quality/files/${doc.fileId}`;
-  const previewUrl = `/api/data-quality/files/${doc.fileId}/preview`;
+  const fileUrl = `/api/${filesRoutePrefix}/files/${doc.fileId}`;
+  const previewUrl = `/api/${filesRoutePrefix}/files/${doc.fileId}/preview`;
 
   // Close on Escape
   useEffect(() => {
