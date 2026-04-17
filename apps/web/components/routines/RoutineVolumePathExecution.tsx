@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import BackButton from "@/components/BackButton";
 import DirectoryExplorerPanel from "@/components/routines/DirectoryExplorerPanel";
+import { getVolumePathConfig } from "@/components/routines/routine-utils";
 import { createJob } from "@/lib/api/jobs";
 import { listVolumes, type AppVolume } from "@/lib/api/volumes";
 import type { GygRoutine } from "@/lib/api/geology-geophysics";
@@ -30,12 +31,13 @@ export default function RoutineVolumePathExecution({
 }: Props) {
   const router = useRouter();
   const apiOptions: ApiClientOptions = { accessToken };
+  const cfg = getVolumePathConfig(routine.slug);
 
   const [volumes, setVolumes] = useState<AppVolume[]>([]);
   const [loadingVolumes, setLoadingVolumes] = useState(true);
   const [volumeId, setVolumeId] = useState("");
   const [directoryPath, setDirectoryPath] = useState("");
-  const [faultFilter, setFaultFilter] = useState("");
+  const [filterValue, setFilterValue] = useState("");
   const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -94,14 +96,14 @@ export default function RoutineVolumePathExecution({
       formData.append("routineId", routine.slug ?? routine.id);
       formData.append("moduleId", "geology_geophysics");
       formData.append("volumeId", volumeId);
-      formData.append(
-        "params",
-        JSON.stringify({
-          directoryPath: dir,
-          faultNameFilter: faultFilter.trim(),
-          overwriteExisting,
-        }),
-      );
+      const jobParams: Record<string, unknown> = {
+        directoryPath: dir,
+        overwriteExisting,
+      };
+      if (cfg.filter) {
+        jobParams[cfg.filter.paramKey] = filterValue.trim();
+      }
+      formData.append("params", JSON.stringify(jobParams));
 
       const data = await createJob(formData, apiOptions);
       router.push(`/jobs/${data.id}`);
@@ -149,8 +151,9 @@ export default function RoutineVolumePathExecution({
                 Volume & path
               </h2>
               <p className="text-xs text-slate-500">
-                Choose where <code className="text-cyan-700">fallas.dat</code>{" "}
-                lives; outputs are written to the same folder.
+                Choose where{" "}
+                <code className="text-cyan-700">{cfg.inputFilename}</code> lives;
+                outputs are written to the same folder.
               </p>
             </div>
           </div>
@@ -213,19 +216,24 @@ export default function RoutineVolumePathExecution({
             </p>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-              <Filter className="h-4 w-4 text-violet-500" />
-              Fault name filter (optional)
-            </label>
-            <input
-              type="text"
-              value={faultFilter}
-              onChange={(e) => setFaultFilter(e.target.value)}
-              placeholder="Leave empty to generate all faults"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
-            />
-          </div>
+          {cfg.filter && (
+            <div className="space-y-1.5">
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                <Filter className="h-4 w-4 text-violet-500" />
+                {cfg.filter.label}
+              </label>
+              <input
+                type="text"
+                value={filterValue}
+                onChange={(e) => setFilterValue(e.target.value)}
+                placeholder={cfg.filter.placeholder}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+              {cfg.filter.helperText && (
+                <p className="text-xs text-slate-500">{cfg.filter.helperText}</p>
+              )}
+            </div>
+          )}
 
           <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-3">
             <input

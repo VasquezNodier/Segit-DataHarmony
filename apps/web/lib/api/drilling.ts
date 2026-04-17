@@ -75,13 +75,48 @@ export interface DrillingApplication {
   name: string;
   description: string;
   url: string;
+  port?: number | null;
   category: string;
+}
+
+function applyPortToUrl(rawUrl: string, port?: number | null): string {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      port &&
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      !parsed.port
+    ) {
+      parsed.port = String(port);
+    }
+    return parsed.toString();
+  } catch {
+    return trimmed;
+  }
+}
+
+function toDrillingApplication(app: DrillingApplication): DrillingApplication {
+  return {
+    ...app,
+    url: applyPortToUrl(app.url, app.port),
+  };
 }
 
 export async function listApplications(
   options?: ApiClientOptions
 ): Promise<DrillingApplication[]> {
-  return apiGet<DrillingApplication[]>(`${BASE}/applications`, options);
+  const list = await apiGet<DrillingApplication[]>(`${BASE}/applications`, options);
+  return list.map(toDrillingApplication);
+}
+
+export async function getApplication(
+  id: string,
+  options?: ApiClientOptions
+): Promise<DrillingApplication> {
+  const app = await apiGet<DrillingApplication>(`${BASE}/applications/${id}`, options);
+  return toDrillingApplication(app);
 }
 
 export async function createApplication(
@@ -89,11 +124,34 @@ export async function createApplication(
     name: string;
     description?: string;
     url: string;
+    port?: number | null;
     category?: string;
   },
   options?: ApiClientOptions
 ): Promise<DrillingApplication> {
-  return apiPost<DrillingApplication>(`${BASE}/applications`, body, options);
+  const payload = { ...body };
+  const app = await apiPost<DrillingApplication>(`${BASE}/applications`, payload, options);
+  return toDrillingApplication(app);
+}
+
+export async function updateApplication(
+  id: string,
+  body: {
+    name: string;
+    description?: string;
+    url: string;
+    port?: number | null;
+    category?: string;
+  },
+  options?: ApiClientOptions
+): Promise<DrillingApplication> {
+  const payload = { ...body };
+  const app = await apiPut<DrillingApplication>(
+    `${BASE}/applications/${id}`,
+    payload,
+    options
+  );
+  return toDrillingApplication(app);
 }
 
 export async function deleteApplication(

@@ -17,6 +17,7 @@ from modules.data_quality.schemas import (
     DQScriptResponse,
     DQApplicationCreate,
     DQApplicationResponse,
+    DQApplicationUpdate,
     DQDocumentCreate,
     DQDocumentResponse,
     FileUploadResponse,
@@ -28,7 +29,9 @@ from modules.drilling.service import (
     update_script_svc,
     delete_script_svc,
     list_applications,
+    get_application_svc,
     create_application_svc,
+    update_application_svc,
     delete_application_svc,
     list_documents,
     create_document_svc,
@@ -89,6 +92,14 @@ def get_applications(db: DbSession, _user=_user_dep()):
     return list_applications(db)
 
 
+@router.get("/applications/{id}", response_model=DQApplicationResponse)
+def get_application_one(id: UUID, db: DbSession, _user=_user_dep()):
+    app = get_application_svc(db, id)
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return app
+
+
 @router.post(
     "/applications",
     response_model=DQApplicationResponse,
@@ -96,6 +107,14 @@ def get_applications(db: DbSession, _user=_user_dep()):
 )
 def post_application(body: DQApplicationCreate, db: DbSession, _user=_user_dep()):
     return create_application_svc(db, body)
+
+
+@router.put("/applications/{id}", response_model=DQApplicationResponse)
+def put_application(id: UUID, body: DQApplicationUpdate, db: DbSession, _user=_user_dep()):
+    app = update_application_svc(db, id, body)
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return app
 
 
 @router.delete("/applications/{id}", status_code=status.HTTP_204_NO_CONTENT)
