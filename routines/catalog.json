@@ -53,6 +53,17 @@
         "needsDatasource": false,
         "executionMode": "fallas_volume_split",
         "module": "geology_geophysics"
+      },
+      {
+        "id": "horizontes-split",
+        "name": "Horizontes 3D split (horizontes.dat)",
+        "description": "Reads horizontes.dat on a registered volume and writes one <Horizon>.dat per horizon block, preserving original lines (legacy option 6 / partir_horizontes_3d.txt).",
+        "script": "internal://horizontes_volume_split",
+        "params": [],
+        "fileInputs": [],
+        "needsDatasource": false,
+        "executionMode": "horizontes_volume_split",
+        "module": "geology_geophysics"
       }
     ]
   }

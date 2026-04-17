@@ -7,6 +7,14 @@ if TYPE_CHECKING:
     from modules.routines.models import Routine
 
 
+# Modos de ejecución que usan el perfil UI `volume_path`
+# (selector de volumen + explorador de directorios).
+VOLUME_PATH_MODES: set[str] = {
+    "fallas_volume_split",
+    "horizontes_volume_split",
+}
+
+
 class ParamSchema(BaseModel):
     key: str
     label: str
@@ -36,7 +44,7 @@ class RoutineResponse(BaseModel):
     @classmethod
     def from_model(cls, r: "Routine") -> "RoutineResponse":
         mode = getattr(r, "execution_mode", None) or "subprocess"
-        profile = "volume_path" if mode == "fallas_volume_split" else "default"
+        profile = "volume_path" if mode in VOLUME_PATH_MODES else "default"
         return cls(
             id=r.id,
             slug=r.slug,

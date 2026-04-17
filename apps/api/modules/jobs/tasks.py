@@ -149,6 +149,95 @@ def run_routine(self, job_id: str):
             db.commit()
             return {"status": "success"}
 
+        if execution_mode == "horizontes_volume_split":
+            try:
+                from modules.routines.horizontes_split.errors import (
+                    HorizontesSplitConflictError,
+                    HorizontesSplitError,
+                )
+                from modules.routines.horizontes_split.service import (
+                    HorizontesSplitService,
+                )
+
+                vid_raw = payload.get("volumeId") or params.get("volumeId")
+                if not vid_raw:
+                    update_job(
+                        db,
+                        job,
+                        status=JobStatus.FAILURE.value,
+                        error="volumeId is required for this routine",
+                        finished_at=datetime.now(timezone.utc),
+                    )
+                    db.commit()
+                    return {"status": "failure"}
+                volume_uuid = UUID(str(vid_raw).strip())
+                directory_path = str(params.get("directoryPath") or "").strip()
+                if not directory_path:
+                    update_job(
+                        db,
+                        job,
+                        status=JobStatus.FAILURE.value,
+                        error="directoryPath is required",
+                        finished_at=datetime.now(timezone.utc),
+                    )
+                    db.commit()
+                    return {"status": "failure"}
+                ow = params.get("overwriteExisting")
+                if isinstance(ow, str):
+                    overwrite = ow.lower() in ("true", "1", "yes", "on")
+                else:
+                    overwrite = bool(ow)
+
+                out = HorizontesSplitService.execute_on_volume(
+                    db,
+                    volume_uuid,
+                    directory_path,
+                    overwrite_existing=overwrite,
+                )
+                update_job(
+                    db,
+                    job,
+                    status=JobStatus.SUCCESS.value,
+                    result=out,
+                    finished_at=datetime.now(timezone.utc),
+                )
+            except HorizontesSplitConflictError as e:
+                update_job(
+                    db,
+                    job,
+                    status=JobStatus.FAILURE.value,
+                    error=e.message,
+                    result={"conflictingFiles": e.conflicting_files, "code": e.code},
+                    finished_at=datetime.now(timezone.utc),
+                )
+            except HorizontesSplitError as e:
+                update_job(
+                    db,
+                    job,
+                    status=JobStatus.FAILURE.value,
+                    error=e.message,
+                    result={"code": getattr(e, "code", "HORIZONTES_SPLIT_ERROR")},
+                    finished_at=datetime.now(timezone.utc),
+                )
+            except ValueError as e:
+                update_job(
+                    db,
+                    job,
+                    status=JobStatus.FAILURE.value,
+                    error=f"Invalid volumeId: {e}",
+                    finished_at=datetime.now(timezone.utc),
+                )
+            except Exception as e:
+                update_job(
+                    db,
+                    job,
+                    status=JobStatus.FAILURE.value,
+                    error=str(e),
+                    finished_at=datetime.now(timezone.utc),
+                )
+            db.commit()
+            return {"status": "success"}
+
         if script_path and script_path.is_file():
             try:
                 env = {"ROUTINE_PARAMS": json.dumps(params)}
