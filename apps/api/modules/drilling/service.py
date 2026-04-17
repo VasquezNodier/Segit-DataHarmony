@@ -17,6 +17,7 @@ from modules.data_quality.repository import (
     get_all_applications,
     create_application,
     get_application_by_id,
+    update_application,
     delete_application,
     get_all_documents,
     create_document,
@@ -29,6 +30,7 @@ from modules.data_quality.schemas import (
     DQScriptResponse,
     DQApplicationCreate,
     DQApplicationResponse,
+    DQApplicationUpdate,
     DQDocumentCreate,
     DQDocumentResponse,
 )
@@ -54,6 +56,7 @@ def _app_to_response(a) -> DQApplicationResponse:
         name=a.name,
         description=a.description,
         url=a.url,
+        port=a.port,
         category=a.category,
     )
 
@@ -128,6 +131,25 @@ def create_application_svc(
         name=body.name,
         description=body.description,
         url=body.url,
+        port=body.port,
+        category=body.category,
+    )
+    return _app_to_response(a)
+
+
+def update_application_svc(
+    db: Session, id: UUID, body: DQApplicationUpdate
+) -> DQApplicationResponse | None:
+    a = get_application_by_id(db, id, module=MODULE_DRILLING)
+    if not a:
+        return None
+    update_application(
+        db,
+        a,
+        name=body.name,
+        description=body.description,
+        url=body.url,
+        port=body.port,
         category=body.category,
     )
     return _app_to_response(a)
@@ -139,6 +161,13 @@ def delete_application_svc(db: Session, id: UUID) -> bool:
         return False
     delete_application(db, a)
     return True
+
+
+def get_application_svc(db: Session, id: UUID) -> DQApplicationResponse | None:
+    a = get_application_by_id(db, id, module=MODULE_DRILLING)
+    if not a:
+        return None
+    return _app_to_response(a)
 
 
 def list_documents(db: Session) -> list[DQDocumentResponse]:

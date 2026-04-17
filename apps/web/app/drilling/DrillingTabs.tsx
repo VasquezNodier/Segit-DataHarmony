@@ -17,16 +17,17 @@ import {
   Pencil,
   Trash2,
   ExternalLink,
+  Monitor,
   FileText,
   Upload,
   Paperclip,
   File,
 } from "lucide-react";
 import ScriptCard from "@/components/data-quality/ScriptCard";
-import ApplicationCard from "@/components/data-quality/ApplicationCard";
 import DocumentationCard from "@/components/data-quality/DocumentationCard";
 import ScriptEditorPanel from "@/components/data-quality/ScriptEditorPanel";
 import DocViewerPanel from "@/components/data-quality/DocViewerPanel";
+import DrillingApplicationCard from "@/components/drilling/DrillingApplicationCard";
 import type {
   DrillingScript,
   DrillingApplication,
@@ -41,6 +42,7 @@ import {
   deleteDocument,
   createScript,
   createApplication,
+  updateApplication,
   createDocument,
   uploadFile,
   updateScriptContent,
@@ -144,7 +146,8 @@ export default function DrillingTabs({
 
   // New-item modal state
   const [showNewScript, setShowNewScript] = useState(false);
-  const [showNewApp, setShowNewApp] = useState(false);
+  const [showAppModal, setShowAppModal] = useState(false);
+  const [editingApp, setEditingApp] = useState<DrillingApplication | null>(null);
   const [showNewDoc, setShowNewDoc] = useState(false);
 
   // ── Filtered lists ──────────────────────────────────────────────────────────
@@ -215,7 +218,10 @@ export default function DrillingTabs({
 
   const handleAddApp = (app: DrillingApplication) => {
     setApplications((prev) => [...prev, app]);
-    setShowNewApp(false);
+  };
+
+  const handleUpdateApp = (app: DrillingApplication) => {
+    setApplications((prev) => prev.map((a) => (a.id === app.id ? app : a)));
   };
 
   const handleAddDoc = (doc: DrillingDocument) => {
@@ -376,7 +382,7 @@ export default function DrillingTabs({
             </div>
             <ViewToggle value={viewMode} onChange={setViewMode} />
             <button
-              onClick={() => setShowNewApp(true)}
+              onClick={() => { setEditingApp(null); setShowAppModal(true); }}
               className="flex items-center gap-1.5 rounded-lg bg-cyan-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-cyan-700 transition whitespace-nowrap"
             >
               <Plus className="h-4 w-4" />
@@ -397,11 +403,20 @@ export default function DrillingTabs({
           ) : viewMode === "cards" ? (
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {filteredApps.map((app) => (
-                <ApplicationCard key={app.id} application={app} onDelete={handleDeleteApp} />
+                <DrillingApplicationCard
+                  key={app.id}
+                  application={app}
+                  onEdit={(a) => { setEditingApp(a); setShowAppModal(true); }}
+                  onDelete={handleDeleteApp}
+                />
               ))}
             </div>
           ) : (
-            <AppListView apps={filteredApps} onDelete={handleDeleteApp} />
+            <AppListView
+              apps={filteredApps}
+              onEdit={(a) => { setEditingApp(a); setShowAppModal(true); }}
+              onDelete={handleDeleteApp}
+            />
           )}
         </div>
       )}
@@ -491,11 +506,17 @@ export default function DrillingTabs({
           apiOptions={apiOptions}
         />
       )}
-      {showNewApp && (
-        <NewAppModal
+      {showAppModal && (
+        <AppModal
           categories={APP_CATEGORIES}
-          onClose={() => setShowNewApp(false)}
-          onCreated={handleAddApp}
+          initial={editingApp}
+          onClose={() => { setShowAppModal(false); setEditingApp(null); }}
+          onSaved={(app) => {
+            if (editingApp) handleUpdateApp(app);
+            else handleAddApp(app);
+            setShowAppModal(false);
+            setEditingApp(null);
+          }}
           apiOptions={apiOptions}
         />
       )}
@@ -631,9 +652,11 @@ const APP_CATEGORY_COLORS: Record<string, string> = {
 
 function AppListView({
   apps,
+  onEdit,
   onDelete,
 }: {
   apps: DrillingApplication[];
+  onEdit: (a: DrillingApplication) => void;
   onDelete: (id: string) => void;
 }) {
   return (
@@ -674,14 +697,28 @@ function AppListView({
                 <td className="px-5 py-3.5 text-right">
                   <div className="flex items-center justify-end gap-1">
                     <a
+                      href={`/drilling/app-viewer/${app.id}`}
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-cyan-50 hover:text-cyan-700 transition"
+                      title="Abrir en portal"
+                    >
+                      <Monitor className="h-4 w-4" />
+                    </a>
+                    <a
                       href={app.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
-                      title="Abrir aplicación"
+                      title="Abrir en nueva pestaña"
                     >
                       <ExternalLink className="h-4 w-4" />
                     </a>
+                    <button
+                      onClick={() => onEdit(app)}
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-cyan-50 hover:text-cyan-600 transition"
+                      title="Editar"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
                     <button
                       onClick={() => { if (confirm(`¿Eliminar "${app.name}"?`)) onDelete(app.id); }}
                       className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 transition"
@@ -819,7 +856,7 @@ function DocMarkdownModal({ doc, onClose }: { doc: DrillingDocument; onClose: ()
       <div className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 text-white">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-linear-to-br from-violet-500 to-purple-600 text-white">
               <FileText className="h-5 w-5" />
             </div>
             <h2 className="text-base font-semibold text-slate-800">{doc.title}</h2>
@@ -987,52 +1024,102 @@ function NewScriptModal({
   );
 }
 
-// ── New App Modal ─────────────────────────────────────────────────────────────
+// ── App Modal (crear / editar) ────────────────────────────────────────────────
 
-function NewAppModal({
+function urlWithoutPortIfStored(url: string, port: number | null | undefined): string {
+  if (port == null) return url;
+  try {
+    const u = new URL(url);
+    if (u.port === String(port)) {
+      u.port = "";
+      return u.toString();
+    }
+  } catch {
+    /* ignore */
+  }
+  return url;
+}
+
+function AppModal({
   categories,
+  initial,
   onClose,
-  onCreated,
+  onSaved,
   apiOptions = {},
 }: {
   categories: string[];
+  initial: DrillingApplication | null;
   onClose: () => void;
-  onCreated: (a: DrillingApplication) => void;
+  onSaved: (a: DrillingApplication) => void;
   apiOptions?: ApiClientOptions;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [url, setUrl] = useState("");
+  const [port, setPort] = useState<string>("");
   const [category, setCategory] = useState("General");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  React.useEffect(() => {
+    if (initial) {
+      setName(initial.name);
+      setDescription(initial.description);
+      setUrl(urlWithoutPortIfStored(initial.url, initial.port));
+      setPort(initial.port != null ? String(initial.port) : "");
+      setCategory(initial.category);
+    } else {
+      setName("");
+      setDescription("");
+      setUrl("");
+      setPort("");
+      setCategory("General");
+    }
+    setError("");
+  }, [initial]);
+
+  const isEdit = Boolean(initial);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !url.trim()) { setError("El nombre y la URL son obligatorios."); return; }
+    const parsedPort = port.trim() ? Number(port) : null;
+    if (parsedPort !== null && (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535)) {
+      setError("El puerto debe ser un entero entre 1 y 65535.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
-      const app = await createApplication(
-        { name, description, url, category },
-        apiOptions
-      );
-      onCreated(app);
+      const payload = { name, description, url, port: parsedPort, category };
+      const app = isEdit && initial
+        ? await updateApplication(initial.id, payload, apiOptions)
+        : await createApplication(payload, apiOptions);
+      onSaved(app);
     } catch {
-      setError("No se pudo crear la aplicación. Inténtalo de nuevo.");
+      setError(isEdit ? "No se pudo guardar los cambios. Inténtalo de nuevo." : "No se pudo crear la aplicación. Inténtalo de nuevo.");
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <ModalWrapper title="Nueva Aplicación" onClose={onClose}>
+    <ModalWrapper title={isEdit ? "Editar aplicación" : "Nueva Aplicación"} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <Field label="Nombre *">
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Mi dashboard" className={inputCls(false)} />
+          <input autoFocus={!isEdit} value={name} onChange={(e) => setName(e.target.value)} placeholder="Mi dashboard" className={inputCls(false)} />
         </Field>
         <Field label="URL *">
           <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." type="url" className={inputCls(false)} />
+        </Field>
+        <Field label="Puerto (opcional)">
+          <input
+            value={port}
+            onChange={(e) => setPort(e.target.value)}
+            placeholder="444"
+            inputMode="numeric"
+            className={inputCls(false)}
+          />
         </Field>
         <Field label="Descripción">
           <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descripción de la aplicación" className={inputCls(false)} />
@@ -1043,7 +1130,11 @@ function NewAppModal({
           </select>
         </Field>
         {error && <p className="text-xs text-red-600">{error}</p>}
-        <ModalActions onClose={onClose} saving={saving} submitLabel="Agregar aplicación" />
+        <ModalActions
+          onClose={onClose}
+          saving={saving}
+          submitLabel={isEdit ? "Guardar cambios" : "Agregar aplicación"}
+        />
       </form>
     </ModalWrapper>
   );
