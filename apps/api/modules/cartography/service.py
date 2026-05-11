@@ -2,9 +2,11 @@
 Servicio de dominio: división del directorio cartográfico por pozo sobre un volumen.
 
 Dado un directorio con archivos `Loc_dist*.pdf/.mxd` de múltiples pozos más una
-subcarpeta `SHP/`, genera una carpeta por pozo ajeno al "dueño" del directorio
-fuente, movida a `dest_path`. El `SHP/` se COPIA a cada carpeta nueva; el
-directorio fuente queda con los archivos del pozo dueño intactos.
+subcarpeta `SHP/`, genera una carpeta por pozo (incluido el dueño) bajo
+`dest_path`. Para pozos ajenos: crea carpeta, mueve PDF/MXD y copia `SHP/`.
+Para el dueño: mueve el directorio completo con `rename` (no-op si ya está en
+la ruta canónica). Tras el split, fase ZIP: un `.zip` por carpeta MAPA que
+incluye el árbol del `.gdb` detectado en destino.
 
 Celery orquesta el job (PENDING→RUNNING→SUCCESS/FAILURE); toda la lógica de
 negocio vive aquí.
@@ -29,6 +31,7 @@ from modules.cartography.parser import (
     parse_file_name,
     parse_source_dir_name,
 )
+from modules.cartography.zip_service import find_gdb_name_in_dest, run_zip_pack_phase
 from modules.volumes.path_sanitize import (
     InvalidVolumePathError,
     join_under_share,
@@ -173,14 +176,19 @@ class CartographySplitService:
             key=lambda k: (0 if k == owner_key else 1, k[0], k[1]),
         )
 
+        src_norm = posixpath.normpath(source_clean.rstrip("/"))
+
         for key in ordered_keys:
             well, cr = key
             is_owner = key == owner_key
             new_dir_name = build_target_dir_name(well, cr)
+            target_dir_path = join_under_share(dest_clean, new_dir_name)
+            tgt_norm = posixpath.normpath(target_dir_path.rstrip("/"))
+
             if is_owner:
-                target_dir_path = source_clean  # queda donde está
+                will_move = tgt_norm != src_norm
             else:
-                target_dir_path = join_under_share(dest_clean, new_dir_name)
+                will_move = True
 
             files_payload = [
                 {"name": f_name, "extension": fi.extension}
@@ -189,15 +197,17 @@ class CartographySplitService:
                 )
             ]
 
-            if not is_owner:
-                # Chequear si el destino ya existe → conflicto
-                if _safe_exists(adapter, target_dir_path):
+            if _safe_exists(adapter, target_dir_path):
+                same_as_source = tgt_norm == src_norm
+                if not same_as_source:
                     conflicts.append(
                         {
                             "path": target_dir_path,
                             "reason": "Target directory already exists",
                         }
                     )
+
+            if not is_owner:
                 new_dirs += 1
                 files_to_move += len(files_payload)
                 if shp_folders:
@@ -211,7 +221,7 @@ class CartographySplitService:
                     "new_dir_name": new_dir_name,
                     "target_dir_path": target_dir_path,
                     "files": files_payload,
-                    "will_move": not is_owner,
+                    "will_move": will_move,
                 }
             )
 
@@ -219,6 +229,21 @@ class CartographySplitService:
         if not dest_exists and new_dirs > 0:
             # No es un conflicto real: lo crearemos en execute
             logger.info("Destination path {} does not exist yet; will be created", dest_clean)
+
+        gdb_found: str | None = None
+        if dest_exists:
+            gdb_found = find_gdb_name_in_dest(adapter, dest_clean)
+
+        warnings: list[str] = []
+        if gdb_found is None:
+            warnings.append(
+                "No GDB directory (*.gdb) found in destPath; ZIPs will fail with NO_GDB_FOUND"
+            )
+
+        zips_to_create = [f"{w['new_dir_name']}.zip" for w in detected_wells]
+        owner_dir_will_move = any(
+            w["is_owner"] and w["will_move"] for w in detected_wells
+        )
 
         return {
             "source_path": source_clean,
@@ -229,10 +254,15 @@ class CartographySplitService:
             "shp_folders": shp_folders,
             "unmatched_files": unmatched_files,
             "conflicts": conflicts,
+            "gdb_found": gdb_found,
+            "zips_to_create": zips_to_create,
+            "warnings": warnings,
             "summary": {
                 "new_dirs_to_create": new_dirs,
                 "files_to_move": files_to_move,
                 "shp_copies_planned": shp_copies_planned,
+                "zips_planned": len(zips_to_create),
+                "owner_dir_will_move": owner_dir_will_move,
             },
         }
 
@@ -248,15 +278,13 @@ class CartographySplitService:
         overwrite_existing: bool = False,
     ) -> dict:
         """
-        Ejecuta la división real. Retorna dict listo para persistir en `job.result`.
+        Ejecuta la división real y la fase ZIP. Retorna dict listo para `job.result`.
 
-        Pasos por pozo ajeno al dueño:
-          1. Crear `{dest}/MAPA_..._WELL_..._MNal`
-          2. Mover PDF y MXD a esa nueva carpeta
-          3. Copiar la subcarpeta SHP (si existe) a esa nueva carpeta
-
-        Si `overwrite_existing=False` y existe alguna carpeta destino, se aborta
-        sin mover nada con `CartographySplitConflictError`.
+        1. Pozos ajenos: crear carpeta en dest, mover PDF/MXD, copiar SHP.
+        2. Dueño: `rename` del directorio fuente completo a `{dest}/MAPA_..._owner`
+           (no-op si ya está en esa ruta).
+        3. ZIP por cada carpeta MAPA en destino + árbol `.gdb` detectado (sin
+           abortar el job si falla un ZIP concreto o falta GDB).
         """
         vol, adapter = _open_volume_adapter(db, volume_id)
         share = vol.share_path or "/"
@@ -282,10 +310,10 @@ class CartographySplitService:
         # (defensa TOCTOU mínima).
         plan = CartographySplitService.preview(db, volume_id, source_path, dest_path)
 
-        owner_key = (plan["owner_well"]["well"], plan["owner_well"]["cr"])
         shp_folder_name: str | None = plan["shp_folders"][0] if plan["shp_folders"] else None
 
         wells_to_move = [w for w in plan["detected_wells"] if not w["is_owner"]]
+        owner_plan = next(w for w in plan["detected_wells"] if w["is_owner"])
 
         # Conflictos: si existen carpetas destino y NO hay overwrite → fallar.
         if plan["conflicts"]:
@@ -369,6 +397,25 @@ class CartographySplitService:
                     f"at {target_dir}: {e}"
                 ) from e
 
+        owner_dir_moved_to: str | None = None
+        if owner_plan["will_move"]:
+            owner_target = owner_plan["target_dir_path"]
+            try:
+                adapter.rename(source_clean, owner_target)
+                owner_dir_moved_to = owner_target
+                logger.info(
+                    "Owner directory renamed {} -> {}", source_clean, owner_target
+                )
+            except Exception as e:
+                raise CartographySplitError(
+                    f"Failed to move owner directory to {owner_target}: {e}"
+                ) from e
+
+        well_dirs = [w["target_dir_path"] for w in plan["detected_wells"]]
+        zip_results, gdb_used_name = run_zip_pack_phase(
+            adapter, dest_clean, well_dirs, overwrite_existing=False
+        )
+
         row_summary = {
             "service": "cartography_maps_split",
             "ownerWell": plan["owner_well"],
@@ -378,10 +425,15 @@ class CartographySplitService:
             "movedFiles": moved_files,
             "shpCopies": shp_copies,
             "unmatchedFiles": plan["unmatched_files"],
+            "ownerDirMovedTo": owner_dir_moved_to,
+            "zipResults": zip_results,
+            "gdbUsed": gdb_used_name,
             "summary": {
                 "newDirsCreated": len(created_dirs),
                 "filesMoved": len(moved_files),
                 "shpCopiesDone": len(shp_copies),
+                "zipsOk": sum(1 for z in zip_results if z.get("status") == "ok"),
+                "zipsTotal": len(zip_results),
             },
             "stdout": (
                 f"Source: {source_clean}\n"
@@ -389,6 +441,9 @@ class CartographySplitService:
                 f"New dirs: {len(created_dirs)} — "
                 f"Files moved: {len(moved_files)} — "
                 f"SHP copies: {len(shp_copies)}\n"
+                f"Owner dir: {owner_dir_moved_to or '(no move)'}\n"
+                f"ZIPs OK: {sum(1 for z in zip_results if z.get('status') == 'ok')}"
+                f" / {len(zip_results)}\n"
             ),
             "stderr": "",
         }

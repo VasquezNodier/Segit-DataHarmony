@@ -402,3 +402,135 @@ def run_cartography_split(self, job_id: str):
         return {"status": "done"}
     finally:
         db.close()
+
+
+@app.task(bind=True, name="run_cartography_zip_pack")
+def run_cartography_zip_pack(self, job_id: str):
+    """
+    Empaqueta directorios MAPA + GDB en ZIPs sobre volumen remoto.
+    Payload: executionMode=cartography_zip_pack, volumeId, destPath, gdbPath,
+    dirsToZip, overwriteExisting.
+    """
+    db = SessionLocal()
+    try:
+        uid = UUID(job_id)
+        job = get_job_by_id(db, uid)
+        if not job:
+            self.update_state(state="FAILURE", meta={"error": "Job not found"})
+            return {"status": "failure", "error": "Job not found"}
+
+        payload = job.payload or {}
+        if payload.get("executionMode") != "cartography_zip_pack":
+            update_job(
+                db,
+                job,
+                status=JobStatus.FAILURE.value,
+                error=f"Unexpected executionMode: {payload.get('executionMode')!r}",
+                finished_at=datetime.now(timezone.utc),
+            )
+            db.commit()
+            return {"status": "failure"}
+
+        update_job(
+            db,
+            job,
+            status=JobStatus.RUNNING.value,
+            task_id=self.request.id,
+            started_at=datetime.now(timezone.utc),
+        )
+        db.commit()
+
+        try:
+            from modules.cartography.errors import (
+                CartographySplitConflictError,
+                CartographySplitError,
+            )
+            from modules.cartography.zip_service import CartographyZipService
+
+            vid_raw = payload.get("volumeId")
+            if not vid_raw:
+                update_job(
+                    db,
+                    job,
+                    status=JobStatus.FAILURE.value,
+                    error="volumeId is required",
+                    finished_at=datetime.now(timezone.utc),
+                )
+                db.commit()
+                return {"status": "failure"}
+            volume_uuid = UUID(str(vid_raw).strip())
+
+            dest_path = str(payload.get("destPath") or "").strip()
+            gdb_path = str(payload.get("gdbPath") or "").strip()
+            dirs_raw = payload.get("dirsToZip") or []
+            if not dest_path or not gdb_path or not isinstance(dirs_raw, list) or not dirs_raw:
+                update_job(
+                    db,
+                    job,
+                    status=JobStatus.FAILURE.value,
+                    error="destPath, gdbPath and dirsToZip are required",
+                    finished_at=datetime.now(timezone.utc),
+                )
+                db.commit()
+                return {"status": "failure"}
+            dirs_to_zip = [str(d).strip() for d in dirs_raw if str(d).strip()]
+
+            ow = payload.get("overwriteExisting")
+            if isinstance(ow, str):
+                overwrite = ow.lower() in ("true", "1", "yes", "on")
+            else:
+                overwrite = bool(ow)
+
+            out = CartographyZipService.zip_dirs(
+                db,
+                volume_uuid,
+                dest_path,
+                gdb_path,
+                dirs_to_zip,
+                overwrite_existing=overwrite,
+            )
+            update_job(
+                db,
+                job,
+                status=JobStatus.SUCCESS.value,
+                result=out,
+                finished_at=datetime.now(timezone.utc),
+            )
+        except CartographySplitConflictError as e:
+            update_job(
+                db,
+                job,
+                status=JobStatus.FAILURE.value,
+                error=e.message,
+                result={"conflictingPaths": e.conflicting_paths, "code": e.code},
+                finished_at=datetime.now(timezone.utc),
+            )
+        except CartographySplitError as e:
+            update_job(
+                db,
+                job,
+                status=JobStatus.FAILURE.value,
+                error=e.message,
+                result={"code": getattr(e, "code", "CARTOGRAPHY_SPLIT_ERROR")},
+                finished_at=datetime.now(timezone.utc),
+            )
+        except ValueError as e:
+            update_job(
+                db,
+                job,
+                status=JobStatus.FAILURE.value,
+                error=f"Invalid volumeId: {e}",
+                finished_at=datetime.now(timezone.utc),
+            )
+        except Exception as e:
+            update_job(
+                db,
+                job,
+                status=JobStatus.FAILURE.value,
+                error=str(e),
+                finished_at=datetime.now(timezone.utc),
+            )
+        db.commit()
+        return {"status": "done"}
+    finally:
+        db.close()

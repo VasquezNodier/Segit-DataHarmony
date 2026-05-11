@@ -7,7 +7,9 @@ Tests de `modules.cartography`.
 """
 from __future__ import annotations
 
+import io
 import posixpath
+import zipfile
 from datetime import datetime, timezone
 from typing import Iterator, Optional
 from uuid import uuid4
@@ -24,6 +26,7 @@ from modules.cartography.parser import (
     parse_source_dir_name,
 )
 from modules.cartography.service import CartographySplitService
+from modules.cartography.zip_service import CartographyZipService
 from modules.volumes.storage.base import (
     BaseStorageAdapter,
     FileStatResult,
@@ -219,8 +222,11 @@ class InMemoryAdapter(BaseStorageAdapter):
             raise StoragePathNotFoundError(p)
         return self._files[p]
 
-    def download_file(self, path: str) -> Iterator[bytes]:  # pragma: no cover
-        yield self.read_file(path)
+    def download_file(self, path: str) -> Iterator[bytes]:
+        data = self.read_file(path)
+        chunk_size = 64 * 1024
+        for i in range(0, len(data), chunk_size):
+            yield data[i : i + chunk_size]
 
     def upload_file(self, remote_path: str, data: bytes) -> int:
         p = self._norm(remote_path)
@@ -380,15 +386,20 @@ class TestPreview:
         assert sorted(w["well"] for w in others) == sorted(OTHER_WELLS)
 
     def test_summary_counts(self, scenario):
-        _, volume = scenario
+        adapter, volume = scenario
+        adapter.add_dir(DEST_DIR)
+        adapter.add_dir(f"{DEST_DIR}/Base_Rubiales.gdb")
         plan = CartographySplitService.preview(
             db=None, volume_id=volume.id, source_path=SOURCE_DIR, dest_path=DEST_DIR
         )
-        assert plan["summary"] == {
-            "new_dirs_to_create": 3,
-            "files_to_move": 6,  # 3 pozos * (pdf + mxd)
-            "shp_copies_planned": 3,
-        }
+        assert plan["summary"]["new_dirs_to_create"] == 3
+        assert plan["summary"]["files_to_move"] == 6
+        assert plan["summary"]["shp_copies_planned"] == 3
+        assert plan["summary"]["zips_planned"] == 4
+        assert plan["summary"]["owner_dir_will_move"] is True
+        assert plan["gdb_found"] == "Base_Rubiales.gdb"
+        assert len(plan["zips_to_create"]) == 4
+        assert plan["warnings"] == []
         assert plan["shp_folders"] == ["SHP"]
         assert plan["unmatched_files"] == []
         assert plan["conflicts"] == []
@@ -399,11 +410,9 @@ class TestPreview:
             db=None, volume_id=volume.id, source_path=SOURCE_DIR, dest_path=DEST_DIR
         )
         for w in plan["detected_wells"]:
-            if w["is_owner"]:
-                assert w["target_dir_path"] == SOURCE_DIR
-            else:
-                assert w["target_dir_path"].startswith(DEST_DIR + "/")
-                assert w["target_dir_path"].endswith(f"_{w['well']}_{w['cr']}_MNal")
+            assert w["target_dir_path"].startswith(DEST_DIR + "/")
+            assert w["target_dir_path"].endswith(f"_{w['well']}_{w['cr']}_MNal")
+            assert w["will_move"] is True
 
     def test_unmatched_files_listed(self, scenario):
         adapter, volume = scenario
@@ -456,6 +465,11 @@ class TestPreview:
 class TestExecute:
     def test_happy_path_moves_and_copies(self, scenario):
         adapter, volume = scenario
+        adapter.add_dir(DEST_DIR)
+        gdb = f"{DEST_DIR}/Base_Rubiales.gdb"
+        adapter.add_dir(gdb)
+        adapter.add_file(f"{gdb}/x.gdbtable", b"gdbdata")
+
         result = CartographySplitService.execute_on_volume(
             db=None,
             volume_id=volume.id,
@@ -463,24 +477,29 @@ class TestExecute:
             dest_path=DEST_DIR,
         )
 
-        # 3 carpetas nuevas creadas
         assert result["summary"]["newDirsCreated"] == 3
         assert result["summary"]["filesMoved"] == 6
         assert result["summary"]["shpCopiesDone"] == 3
+        assert result["gdbUsed"] == "Base_Rubiales.gdb"
+        assert len(result["zipResults"]) == 4
+        assert all(z["status"] == "ok" for z in result["zipResults"])
+        assert not adapter.exists(SOURCE_DIR)
 
-        # Owner sigue intacto con sus 2 archivos + SHP original
+        owner_target = (
+            f"{DEST_DIR}/MAPA_LOC_DIST_LINDERO_TRAYECTORIA_{OWNER_WELL}_4CR_MNal"
+        )
+        assert result["ownerDirMovedTo"] == owner_target
         for ext in ("pdf", "mxd"):
             assert adapter.exists(
-                f"{SOURCE_DIR}/Loc_dist_Survey_{OWNER_WELL}_4CR_MNal_SGC.{ext}"
+                f"{owner_target}/Loc_dist_Survey_{OWNER_WELL}_4CR_MNal_SGC.{ext}"
             )
         for sf in SHP_FILES:
-            assert adapter.exists(f"{SOURCE_DIR}/SHP/{sf}")
+            assert adapter.exists(f"{owner_target}/SHP/{sf}")
 
-        # Otros pozos: PDF/MXD ya no están en source, sí en el destino
         for well in OTHER_WELLS:
             for ext in ("pdf", "mxd"):
                 assert not adapter.exists(
-                    f"{SOURCE_DIR}/Loc_dist_Survey_{well}_4CR_MNal_SGC.{ext}"
+                    f"{owner_target}/Loc_dist_Survey_{well}_4CR_MNal_SGC.{ext}"
                 )
             target = (
                 f"{DEST_DIR}/MAPA_LOC_DIST_LINDERO_TRAYECTORIA_{well}_4CR_MNal"
@@ -489,9 +508,15 @@ class TestExecute:
                 assert adapter.exists(
                     f"{target}/Loc_dist_Survey_{well}_4CR_MNal_SGC.{ext}"
                 )
-            # SHP copiado completo
             for sf in SHP_FILES:
                 assert adapter.exists(f"{target}/SHP/{sf}")
+
+        zip_path = f"{DEST_DIR}/MAPA_LOC_DIST_LINDERO_TRAYECTORIA_{OWNER_WELL}_4CR_MNal.zip"
+        raw = adapter.read_file(zip_path)
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+        names = zf.namelist()
+        assert any(n.startswith("MAPA_LOC_DIST_LINDERO_TRAYECTORIA_") for n in names)
+        assert any(n.startswith("Base_Rubiales.gdb/") for n in names)
 
     def test_conflict_without_overwrite_raises_and_preserves_source(self, scenario):
         adapter, volume = scenario
@@ -539,3 +564,145 @@ class TestExecute:
             f"{existing}/Loc_dist_Survey_RUBIALES2263H_4CR_MNal_SGC.pdf"
         )
         assert adapter.exists(f"{existing}/SHP/mapa.shp")
+
+
+class TestPreviewZipFields:
+    def test_missing_gdb_warns_in_preview(self, scenario):
+        _, volume = scenario
+        plan = CartographySplitService.preview(
+            db=None, volume_id=volume.id, source_path=SOURCE_DIR, dest_path=DEST_DIR
+        )
+        assert plan["gdb_found"] is None
+        assert plan["warnings"]
+        assert "NO_GDB_FOUND" in plan["warnings"][0]
+
+
+class TestExecuteZipEdgeCases:
+    def test_missing_gdb_skips_zips_in_execute(self, scenario):
+        adapter, volume = scenario
+        result = CartographySplitService.execute_on_volume(
+            db=None,
+            volume_id=volume.id,
+            source_path=SOURCE_DIR,
+            dest_path=DEST_DIR,
+        )
+        assert result["gdbUsed"] is None
+        assert len(result["zipResults"]) == 4
+        for z in result["zipResults"]:
+            assert z["status"] == "error"
+            assert z["message"] == "NO_GDB_FOUND"
+
+    def test_existing_zip_is_error_and_continues(self, scenario):
+        adapter, volume = scenario
+        adapter.add_dir(DEST_DIR)
+        gdb = f"{DEST_DIR}/Base_Rubiales.gdb"
+        adapter.add_dir(gdb)
+        adapter.add_file(f"{gdb}/t", b"x")
+        conflict_zip = (
+            f"{DEST_DIR}/MAPA_LOC_DIST_LINDERO_TRAYECTORIA_RUBIALES2263H_4CR_MNal.zip"
+        )
+        adapter.add_file(conflict_zip, content=b"preexisting")
+
+        result = CartographySplitService.execute_on_volume(
+            db=None,
+            volume_id=volume.id,
+            source_path=SOURCE_DIR,
+            dest_path=DEST_DIR,
+        )
+        by_name = {z["zipName"]: z for z in result["zipResults"]}
+        assert by_name[
+            "MAPA_LOC_DIST_LINDERO_TRAYECTORIA_RUBIALES2263H_4CR_MNal.zip"
+        ]["status"] == "error"
+        assert "Already exists" in by_name[
+            "MAPA_LOC_DIST_LINDERO_TRAYECTORIA_RUBIALES2263H_4CR_MNal.zip"
+        ]["message"]
+        ok_zips = [z for z in result["zipResults"] if z["status"] == "ok"]
+        assert len(ok_zips) == 3
+
+
+class TestOwnerNoop:
+    def test_owner_target_equals_source_is_noop(self, monkeypatch):
+        adapter = InMemoryAdapter()
+        nested_source = (
+            f"{DEST_DIR}/MAPA_LOC_DIST_LINDERO_TRAYECTORIA_RUBIALES1747H_4CR_MNal"
+        )
+        adapter.add_dir(nested_source)
+        for well in RUBIALES_WELLS:
+            for ext in ("pdf", "mxd"):
+                adapter.add_file(
+                    f"{nested_source}/Loc_dist_Survey_{well}_4CR_MNal_SGC.{ext}",
+                    content=f"{well}-{ext}".encode("ascii"),
+                )
+        for sf in SHP_FILES:
+            adapter.add_file(f"{nested_source}/SHP/{sf}", content=sf.encode("ascii"))
+        adapter.add_dir("/cartografia")
+        gdb = f"{DEST_DIR}/GDB_Rubiales.gdb"
+        adapter.add_dir(gdb)
+        adapter.add_file(f"{gdb}/a", b"1")
+
+        volume = _FakeVolume(share="/cartografia")
+
+        def fake_get_volume_by_id(db, volume_id):
+            return volume
+
+        def fake_get_adapter(vol):
+            return adapter
+
+        monkeypatch.setattr(
+            "modules.cartography.service.get_volume_by_id", fake_get_volume_by_id
+        )
+        monkeypatch.setattr(
+            "modules.cartography.service.get_adapter", fake_get_adapter
+        )
+
+        plan = CartographySplitService.preview(
+            db=None, volume_id=volume.id, source_path=nested_source, dest_path=DEST_DIR
+        )
+        owner = next(w for w in plan["detected_wells"] if w["is_owner"])
+        assert owner["will_move"] is False
+
+        result = CartographySplitService.execute_on_volume(
+            db=None,
+            volume_id=volume.id,
+            source_path=nested_source,
+            dest_path=DEST_DIR,
+        )
+        assert result["ownerDirMovedTo"] is None
+        assert adapter.exists(nested_source)
+        assert all(z["status"] == "ok" for z in result["zipResults"])
+
+
+class TestZipServiceManual:
+    def test_zip_dirs_happy_path(self, monkeypatch):
+        adapter = InMemoryAdapter()
+        adapter.add_dir(DEST_DIR)
+        well_a = f"{DEST_DIR}/MAPA_A"
+        well_b = f"{DEST_DIR}/MAPA_B"
+        adapter.add_dir(well_a)
+        adapter.add_file(f"{well_a}/f.pdf", b"pdf")
+        adapter.add_dir(well_b)
+        adapter.add_file(f"{well_b}/g.mxd", b"mxd")
+        gdb = f"{DEST_DIR}/Common.gdb"
+        adapter.add_dir(gdb)
+        adapter.add_file(f"{gdb}/t", b"t")
+
+        vol = _FakeVolume(share="/cartografia")
+
+        monkeypatch.setattr(
+            "modules.cartography.zip_service.get_volume_by_id", lambda db, vid: vol
+        )
+        monkeypatch.setattr(
+            "modules.cartography.zip_service.get_adapter", lambda v: adapter
+        )
+
+        out = CartographyZipService.zip_dirs(
+            db=None,
+            volume_id=vol.id,
+            dest_path=DEST_DIR,
+            gdb_path=gdb,
+            dirs_to_zip=[well_a, well_b],
+            overwrite_existing=False,
+        )
+        assert out["summary"]["zipsOk"] == 2
+        assert adapter.exists(f"{DEST_DIR}/MAPA_A.zip")
+        assert adapter.exists(f"{DEST_DIR}/MAPA_B.zip")
