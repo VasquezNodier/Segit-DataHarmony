@@ -44,6 +44,8 @@ export interface SplitSummary {
   newDirsToCreate: number;
   filesToMove: number;
   shpCopiesPlanned: number;
+  zipsPlanned: number;
+  ownerDirWillMove: boolean;
 }
 
 export interface OwnerInfo {
@@ -60,6 +62,9 @@ export interface SplitPreviewResponse {
   shpFolders: string[];
   unmatchedFiles: string[];
   conflicts: ConflictEntry[];
+  gdbFound: string | null;
+  zipsToCreate: string[];
+  warnings: string[];
   summary: SplitSummary;
 }
 
@@ -67,6 +72,71 @@ export interface SplitExecuteResponse {
   jobId: string;
   taskId: string | null;
   status: string;
+}
+
+export interface ZipPackPreviewRequest {
+  volumeId: string;
+  destPath: string;
+  gdbPath: string;
+  dirsToZip: string[];
+}
+
+export interface ZipPackExecuteRequest extends ZipPackPreviewRequest {
+  overwriteExisting?: boolean;
+}
+
+export interface ZipPackPreviewResponse {
+  destPath: string;
+  gdbPath: string;
+  gdbFound: string;
+  dirsToZip: string[];
+  zipsToCreate: string[];
+  conflicts: ConflictEntry[];
+  warnings: string[];
+}
+
+export interface ZipResultEntry {
+  zipName: string;
+  path: string;
+  status: string;
+  message: string;
+  sizeBytes?: number | null;
+}
+
+export interface CartographySplitJobResult {
+  service?: string;
+  ownerWell?: OwnerInfo;
+  sourcePath?: string;
+  destPath?: string;
+  createdDirs?: string[];
+  movedFiles?: Array<{
+    well: string;
+    cr: string;
+    name: string;
+    from: string;
+    to: string;
+  }>;
+  shpCopies?: Array<{ well: string; cr: string; from: string; to: string }>;
+  unmatchedFiles?: string[];
+  ownerDirMovedTo?: string | null;
+  zipResults?: ZipResultEntry[];
+  gdbUsed?: string | null;
+  summary?: {
+    newDirsCreated?: number;
+    filesMoved?: number;
+    shpCopiesDone?: number;
+    zipsOk?: number;
+    zipsTotal?: number;
+  };
+}
+
+export interface CartographyZipPackJobResult {
+  service?: string;
+  destPath?: string;
+  gdbPath?: string;
+  gdbUsed?: string | null;
+  zipResults?: ZipResultEntry[];
+  summary?: { zipsOk?: number; zipsTotal?: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -85,4 +155,18 @@ export async function executeSplit(
   options?: ApiClientOptions,
 ): Promise<SplitExecuteResponse> {
   return apiPost<SplitExecuteResponse>(`${BASE}/split/execute`, body, options);
+}
+
+export async function previewZipPack(
+  body: ZipPackPreviewRequest,
+  options?: ApiClientOptions,
+): Promise<ZipPackPreviewResponse> {
+  return apiPost<ZipPackPreviewResponse>(`${BASE}/zip/preview`, body, options);
+}
+
+export async function executeZipPack(
+  body: ZipPackExecuteRequest,
+  options?: ApiClientOptions,
+): Promise<SplitExecuteResponse> {
+  return apiPost<SplitExecuteResponse>(`${BASE}/zip/execute`, body, options);
 }

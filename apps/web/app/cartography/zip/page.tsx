@@ -5,30 +5,45 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
-  Play,
-  Loader2,
+  Archive,
   AlertCircle,
-  HardDrive,
-  FolderInput,
-  FolderOutput,
   Eye,
+  FolderOutput,
+  HardDrive,
+  Loader2,
   Map as MapIcon,
+  Play,
   Target,
 } from "lucide-react";
 import BackButton from "@/components/BackButton";
 import DirectoryExplorerPanel from "@/components/routines/DirectoryExplorerPanel";
-import SplitPreview from "@/components/cartography/SplitPreview";
-import { listVolumes, type AppVolume } from "@/lib/api/volumes";
+import type { FileEntry } from "@/lib/api/volumes";
 import {
-  executeSplit,
-  previewSplit,
-  type SplitPreviewResponse,
+  executeZipPack,
+  previewZipPack,
+  type ZipPackPreviewResponse,
 } from "@/lib/api/cartography";
+import { listVolumes, type AppVolume } from "@/lib/api/volumes";
 import type { ApiClientOptions } from "@/lib/api/client";
 
-type PathTarget = "source" | "dest";
+function parentDir(p: string): string {
+  const t = p.replace(/\/+$/, "");
+  const i = t.lastIndexOf("/");
+  if (i <= 0) return "/";
+  return t.slice(0, i) || "/";
+}
 
-export default function CartographySplitPage() {
+function mapaFolderSelectable(e: FileEntry): boolean {
+  return (
+    e.type === "folder" &&
+    e.name.startsWith("MAPA_") &&
+    !e.name.toLowerCase().endsWith(".gdb")
+  );
+}
+
+type ExplorerTab = "mapa" | "gdb";
+
+export default function CartographyZipPage() {
   const router = useRouter();
   const { data: session } = useSession();
   const accessToken =
@@ -38,14 +53,16 @@ export default function CartographySplitPage() {
   const [volumes, setVolumes] = useState<AppVolume[]>([]);
   const [loadingVolumes, setLoadingVolumes] = useState(true);
   const [volumeId, setVolumeId] = useState("");
-  const [sourcePath, setSourcePath] = useState("");
   const [destPath, setDestPath] = useState("");
+  const [gdbPath, setGdbPath] = useState("");
+  const [dirsToZip, setDirsToZip] = useState<string[]>([]);
   const [overwriteExisting, setOverwriteExisting] = useState(false);
-  const [activeTarget, setActiveTarget] = useState<PathTarget>("source");
+  const [explorerTab, setExplorerTab] = useState<ExplorerTab>("mapa");
+  const [explorerPath, setExplorerPath] = useState("");
 
   const [previewing, setPreviewing] = useState(false);
   const [executing, setExecuting] = useState(false);
-  const [plan, setPlan] = useState<SplitPreviewResponse | null>(null);
+  const [zipPlan, setZipPlan] = useState<ZipPackPreviewResponse | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
   const prevVolumeRef = useRef<string>("");
@@ -78,42 +95,61 @@ export default function CartographySplitPage() {
       const v = volumes.find((x) => x.id === volumeId);
       if (v) {
         const root = v.sharePath?.trim() || "";
-        setSourcePath(root);
         setDestPath(root);
-        setPlan(null);
+        setGdbPath("");
+        setDirsToZip([]);
+        setExplorerPath(root);
+        setZipPlan(null);
       }
     }
   }, [volumeId, volumes]);
 
+  const toggleDir = (path: string) => {
+    setDirsToZip((prev) =>
+      prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path],
+    );
+    setZipPlan(null);
+    setDestPath((d) => {
+      if (!d.trim()) return parentDir(path);
+      return d;
+    });
+  };
+
+  const onPickGdb = (path: string) => {
+    setGdbPath(path);
+    setZipPlan(null);
+  };
+
   const canSubmit = Boolean(
-    volumeId && sourcePath.trim() && destPath.trim() && !previewing && !executing,
+    volumeId &&
+      destPath.trim() &&
+      gdbPath.trim() &&
+      dirsToZip.length > 0 &&
+      !previewing &&
+      !executing,
   );
+
   const hasBlockingConflicts = Boolean(
-    plan && plan.conflicts.length > 0 && !overwriteExisting,
-  );
-  const hasNothingToDo = Boolean(
-    plan &&
-      plan.summary.newDirsToCreate === 0 &&
-      plan.summary.filesToMove === 0 &&
-      !plan.summary.ownerDirWillMove,
+    zipPlan && zipPlan.conflicts.length > 0 && !overwriteExisting,
   );
 
   const runPreview = async (e?: React.FormEvent) => {
     e?.preventDefault();
     setGlobalError(null);
-    setPlan(null);
+    setZipPlan(null);
     if (!canSubmit) return;
     setPreviewing(true);
     try {
-      const res = await previewSplit(
+      const res = await previewZipPack(
         {
           volumeId,
-          sourcePath: sourcePath.trim(),
           destPath: destPath.trim(),
+          gdbPath: gdbPath.trim(),
+          dirsToZip: dirsToZip,
         },
         apiOptions,
       );
-      setPlan(res);
+      setZipPlan(res);
     } catch (err: unknown) {
       setGlobalError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -123,23 +159,24 @@ export default function CartographySplitPage() {
 
   const runExecute = async () => {
     setGlobalError(null);
-    if (!plan) {
+    if (!zipPlan) {
       setGlobalError("Primero genera una previsualización.");
       return;
     }
     if (hasBlockingConflicts) {
       setGlobalError(
-        "Existen conflictos sin resolver. Activa sobreescribir o elimina las carpetas destino.",
+        "Hay ZIPs ya existentes. Activa sobreescribir o elimínalos antes de ejecutar.",
       );
       return;
     }
     setExecuting(true);
     try {
-      const res = await executeSplit(
+      const res = await executeZipPack(
         {
           volumeId,
-          sourcePath: sourcePath.trim(),
           destPath: destPath.trim(),
+          gdbPath: gdbPath.trim(),
+          dirsToZip: dirsToZip,
           overwriteExisting,
         },
         apiOptions,
@@ -151,36 +188,35 @@ export default function CartographySplitPage() {
     }
   };
 
-  const explorerPath =
-    activeTarget === "source" ? sourcePath.trim() : destPath.trim();
   const onExplorerNavigate = (p: string) => {
-    if (activeTarget === "source") setSourcePath(p);
-    else setDestPath(p);
-    setPlan(null);
+    setExplorerPath(p);
+    setZipPlan(null);
   };
 
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-start gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-linear-to-br from-cyan-500 to-emerald-600 text-white shadow-sm">
-            <MapIcon className="h-6 w-6" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-linear-to-br from-violet-500 to-cyan-600 text-white shadow-sm">
+            <Archive className="h-6 w-6" />
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="mb-2 flex flex-wrap items-center gap-3">
               <BackButton />
               <h1 className="text-xl font-semibold text-slate-800">
-                División por pozo
+                Empaquetado ZIP (MAPA + GDB)
               </h1>
             </div>
             <p className="text-sm text-slate-500">
-              Toma un directorio{" "}
+              Selecciona varias carpetas{" "}
               <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">
-                MAPA_LOC_DIST_LINDERO_TRAYECTORIA_&lt;pozo&gt;_&lt;NCR&gt;_MNal
+                MAPA_*
               </code>{" "}
-              con archivos PDF/MXD de varios pozos y crea una carpeta por pozo
-              ajeno en el destino, moviendo los archivos correspondientes y
-              copiando la subcarpeta SHP.
+              y un directorio{" "}
+              <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">
+                *.gdb
+              </code>
+              . Se creará un ZIP por carpeta MAPA bajo el destino indicado.
             </p>
           </div>
         </div>
@@ -189,10 +225,10 @@ export default function CartographySplitPage() {
       <div className="flex flex-col gap-6 lg:grid lg:grid-cols-2 lg:items-start">
         <form
           onSubmit={runPreview}
-          className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+          className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
         >
           <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-100 text-cyan-600">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-100 text-violet-600">
               <HardDrive className="h-5 w-5" />
             </div>
             <div>
@@ -200,8 +236,7 @@ export default function CartographySplitPage() {
                 Volumen y rutas
               </h2>
               <p className="text-xs text-slate-500">
-                Elige el volumen y las rutas fuente/destino (relativas al
-                sharePath).
+                El ZIP se escribe en <code className="font-mono">destPath</code>.
               </p>
             </div>
           </div>
@@ -222,27 +257,22 @@ export default function CartographySplitPage() {
               </div>
             ) : volumes.length === 0 ? (
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                No hay volúmenes activos. Registra o activa uno en{" "}
-                <Link href="/volumes" className="font-medium underline">
-                  Volúmenes
-                </Link>
-                .
+                No hay volúmenes activos.
               </p>
             ) : (
               <select
                 value={volumeId}
                 onChange={(e) => {
                   setVolumeId(e.target.value);
-                  setPlan(null);
+                  setZipPlan(null);
                 }}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-800 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-800 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
                 required
               >
                 <option value="">— Selecciona un volumen —</option>
                 {volumes.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.name} ({v.volumeType})
-                    {v.module ? ` · ${v.module}` : ""}
                   </option>
                 ))}
               </select>
@@ -251,99 +281,61 @@ export default function CartographySplitPage() {
 
           <div className="space-y-1.5">
             <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-              <FolderInput className="h-4 w-4 text-slate-400" />
-              Directorio fuente
+              <FolderOutput className="h-4 w-4 text-slate-400" />
+              Directorio destino (donde están los MAPA y salen los .zip)
             </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={sourcePath}
-                onChange={(e) => {
-                  setSourcePath(e.target.value);
-                  setPlan(null);
-                }}
-                onFocus={() => setActiveTarget("source")}
-                placeholder="/cartografia/MAPA_LOC_DIST_LINDERO_TRAYECTORIA_..."
-                className="flex-1 rounded-lg border border-slate-200 px-3 py-2.5 font-mono text-sm text-slate-800 placeholder:text-slate-400 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-              />
-              <button
-                type="button"
-                onClick={() => setActiveTarget("source")}
-                className={`inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-medium transition ${
-                  activeTarget === "source"
-                    ? "border-cyan-500 bg-cyan-50 text-cyan-700"
-                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                <Target className="h-3.5 w-3.5" />
-                Explorar
-              </button>
-            </div>
-            <p className="text-xs text-slate-500">
-              Carpeta con nombre{" "}
-              <code className="font-mono">
-                MAPA_LOC_DIST_LINDERO_TRAYECTORIA_&lt;pozo&gt;_&lt;NCR&gt;_MNal
-              </code>
-              .
-            </p>
+            <input
+              type="text"
+              value={destPath}
+              onChange={(e) => {
+                setDestPath(e.target.value);
+                setZipPlan(null);
+              }}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 font-mono text-sm text-slate-800 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              placeholder="/cartografia/output"
+            />
           </div>
 
           <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-              <FolderOutput className="h-4 w-4 text-slate-400" />
-              Directorio destino
+            <label className="text-sm font-medium text-slate-700">
+              GDB seleccionada (ruta completa)
             </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={destPath}
-                onChange={(e) => {
-                  setDestPath(e.target.value);
-                  setPlan(null);
-                }}
-                onFocus={() => setActiveTarget("dest")}
-                placeholder="/cartografia/output"
-                className="flex-1 rounded-lg border border-slate-200 px-3 py-2.5 font-mono text-sm text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-              />
-              <button
-                type="button"
-                onClick={() => setActiveTarget("dest")}
-                className={`inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-medium transition ${
-                  activeTarget === "dest"
-                    ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                <Target className="h-3.5 w-3.5" />
-                Explorar
-              </button>
-            </div>
-            <p className="text-xs text-slate-500">
-              Donde quedarán las carpetas MAPA por pozo (incl. la del dueño) y los
-              ZIPs generados.
-            </p>
+            <input
+              type="text"
+              value={gdbPath}
+              onChange={(e) => {
+                setGdbPath(e.target.value);
+                setZipPlan(null);
+              }}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 font-mono text-sm text-slate-800 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              placeholder="/cartografia/output/Base_Rubiales.gdb"
+            />
           </div>
 
-          <p className="text-xs text-slate-500">
-            ¿Solo necesitas empaquetar ZIPs?{" "}
-            <Link
-              href="/cartography/zip"
-              className="font-medium text-violet-700 hover:underline"
-            >
-              Ir a empaquetado ZIP manual
-            </Link>
-            .
-          </p>
+          <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-3 text-xs text-slate-600">
+            <p className="font-medium text-slate-700">
+              Carpetas MAPA seleccionadas ({dirsToZip.length})
+            </p>
+            {dirsToZip.length === 0 ? (
+              <p className="mt-1 text-slate-500">Ninguna — usa el explorador (modo MAPA).</p>
+            ) : (
+              <ul className="mt-1 max-h-28 space-y-0.5 overflow-y-auto font-mono text-[11px]">
+                {dirsToZip.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+            )}
+          </div>
 
           <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-3">
             <input
               type="checkbox"
               checked={overwriteExisting}
               onChange={(e) => setOverwriteExisting(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+              className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
             />
             <span className="text-sm text-slate-700">
-              Sobreescribir carpetas de destino existentes
+              Sobreescribir ZIPs ya existentes en destino
             </span>
           </label>
 
@@ -352,12 +344,12 @@ export default function CartographySplitPage() {
               href="/cartography"
               className="rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
             >
-              Cancelar
+              Volver
             </Link>
             <button
               type="submit"
               disabled={!canSubmit}
-              className="inline-flex items-center gap-2 rounded-lg border border-cyan-300 bg-white px-5 py-2.5 text-sm font-semibold text-cyan-700 shadow-sm hover:bg-cyan-50 disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-lg border border-violet-300 bg-white px-5 py-2.5 text-sm font-semibold text-violet-700 shadow-sm hover:bg-violet-50 disabled:opacity-50"
             >
               {previewing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -369,80 +361,99 @@ export default function CartographySplitPage() {
             <button
               type="button"
               onClick={runExecute}
-              disabled={
-                !plan ||
-                executing ||
-                previewing ||
-                hasBlockingConflicts ||
-                hasNothingToDo
-              }
-              className="inline-flex items-center gap-2 rounded-lg bg-linear-to-r from-cyan-600 to-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:from-cyan-700 hover:to-emerald-700 disabled:opacity-50"
+              disabled={!zipPlan || executing || previewing || hasBlockingConflicts}
+              className="inline-flex items-center gap-2 rounded-lg bg-linear-to-r from-violet-600 to-cyan-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:from-violet-700 hover:to-cyan-700 disabled:opacity-50"
             >
               {executing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Play className="h-4 w-4" />
               )}
-              {executing ? "Iniciando…" : "Ejecutar división"}
+              {executing ? "Iniciando…" : "Ejecutar ZIPs"}
             </button>
           </div>
         </form>
 
         <div className="min-h-[320px] lg:h-[calc(100vh-260px)] lg:min-h-[480px]">
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Explorador ·{" "}
-              <span
-                className={
-                  activeTarget === "source" ? "text-cyan-600" : "text-emerald-600"
-                }
-              >
-                {activeTarget === "source" ? "Fuente" : "Destino"}
-              </span>
+              Explorador
             </p>
             <div className="flex gap-1 rounded-lg border border-slate-200 bg-white p-0.5 text-xs">
               <button
                 type="button"
-                onClick={() => setActiveTarget("source")}
+                onClick={() => setExplorerTab("mapa")}
                 className={`rounded px-2 py-1 ${
-                  activeTarget === "source"
-                    ? "bg-cyan-100 text-cyan-700"
+                  explorerTab === "mapa"
+                    ? "bg-violet-100 text-violet-800"
                     : "text-slate-500 hover:bg-slate-50"
                 }`}
               >
-                Fuente
+                MAPA (multi)
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTarget("dest")}
+                onClick={() => setExplorerTab("gdb")}
                 className={`rounded px-2 py-1 ${
-                  activeTarget === "dest"
-                    ? "bg-emerald-100 text-emerald-700"
+                  explorerTab === "gdb"
+                    ? "bg-cyan-100 text-cyan-800"
                     : "text-slate-500 hover:bg-slate-50"
                 }`}
               >
-                Destino
+                GDB
               </button>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                setExplorerPath(destPath.trim() || explorerPath);
+              }}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+            >
+              <Target className="h-3.5 w-3.5" />
+              Ir a destino
+            </button>
           </div>
           <DirectoryExplorerPanel
             volumeId={volumeId || null}
             path={explorerPath}
             onNavigateToFolder={onExplorerNavigate}
             apiOptions={apiOptions}
+            mode={explorerTab === "mapa" ? "multiFolder" : "pickGdb"}
+            selectedFolderPaths={dirsToZip}
+            onToggleFolderSelect={toggleDir}
+            onPickGdbFolder={onPickGdb}
+            folderSelectableFilter={
+              explorerTab === "mapa" ? mapaFolderSelectable : undefined
+            }
           />
         </div>
       </div>
 
-      {plan && (
+      {zipPlan && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex items-center gap-2">
-            <Eye className="h-5 w-5 text-cyan-600" />
-            <h2 className="text-sm font-semibold text-slate-800">
-              Plan propuesto
-            </h2>
+          <div className="mb-3 flex items-center gap-2">
+            <Archive className="h-5 w-5 text-violet-600" />
+            <h2 className="text-sm font-semibold text-slate-800">Plan ZIP</h2>
           </div>
-          <SplitPreview plan={plan} />
+          {zipPlan.conflicts.length > 0 && (
+            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+              <p className="font-semibold">Conflictos</p>
+              <ul className="mt-1 font-mono">
+                {zipPlan.conflicts.map((c) => (
+                  <li key={c.path}>{c.path}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <p className="text-xs text-slate-600">
+            GDB: <code className="font-mono">{zipPlan.gdbFound}</code>
+          </p>
+          <ul className="mt-2 max-h-48 overflow-y-auto font-mono text-xs text-slate-700">
+            {zipPlan.zipsToCreate.map((z) => (
+              <li key={z}>{z}</li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

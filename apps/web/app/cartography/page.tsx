@@ -12,6 +12,11 @@ const SUBMODULE_META: Record<
       "Divide automáticamente un directorio de cartografía con PDF/MXD de varios pozos en carpetas individuales por pozo, copiando la subcarpeta SHP compartida.",
     badge: "Nuevo",
   },
+  "/cartography/zip": {
+    description:
+      "Genera ZIPs por carpeta MAPA incluyendo un directorio .gdb común (streaming en worker). Útil para repetir el empaquetado sin re-ejecutar el split.",
+    badge: "ZIP",
+  },
   "/cartography/projects-index": {
     description:
       "Índice consolidado de proyectos cartográficos disponibles en los volúmenes.",
@@ -63,7 +68,9 @@ export default function CartographyPage() {
             {submodules.map((item) => {
               const meta = SUBMODULE_META[item.href];
               const Icon = item.icon ?? FALLBACK_ICON;
-              const isAction = item.href === "/cartography/split";
+              const isAction =
+                item.href === "/cartography/split" ||
+                item.href === "/cartography/zip";
 
               return (
                 <Link
