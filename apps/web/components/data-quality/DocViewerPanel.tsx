@@ -121,9 +121,12 @@ function SheetTable({ rows }: { rows: (string | number | boolean | null)[][] }) 
 export default function DocViewerPanel({
   doc,
   onClose,
+  filesRoutePrefix = "data-quality",
 }: {
   doc: DQDocument;
   onClose: () => void;
+  /** Segmento de ruta bajo `/api/`, p. ej. `data-quality` o `drilling`. */
+  filesRoutePrefix?: string;
 }) {
   const [preview, setPreview] = useState<PreviewState>({ status: "loading" });
   const [activeSheet, setActiveSheet] = useState(0);

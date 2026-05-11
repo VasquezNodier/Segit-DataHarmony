@@ -21,11 +21,20 @@ const rowCls =
 const inputCls =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500";
 
+export type ExplorerMode = "browse" | "multiFolder" | "pickGdb";
+
 interface Props {
   volumeId: string | null;
   path: string;
   onNavigateToFolder: (newPath: string) => void;
   apiOptions: ApiClientOptions;
+  /** browse: solo navegación. multiFolder: checkbox por carpeta. pickGdb: clic en *.gdb elige ruta. */
+  mode?: ExplorerMode;
+  selectedFolderPaths?: string[];
+  onToggleFolderSelect?: (folderPath: string) => void;
+  onPickGdbFolder?: (folderPath: string) => void;
+  /** Si devuelve false, la carpeta no es seleccionable (solo modo multiFolder). */
+  folderSelectableFilter?: (entry: FileEntry) => boolean;
 }
 
 export default function DirectoryExplorerPanel({
@@ -33,6 +42,11 @@ export default function DirectoryExplorerPanel({
   path,
   onNavigateToFolder,
   apiOptions,
+  mode = "browse",
+  selectedFolderPaths = [],
+  onToggleFolderSelect,
+  onPickGdbFolder,
+  folderSelectableFilter,
 }: Props) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -76,6 +90,8 @@ export default function DirectoryExplorerPanel({
     load();
   }, [load]);
 
+  const selectedSet = new Set(selectedFolderPaths);
+
   if (!volumeId) {
     return (
       <div className="flex h-full min-h-[280px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-8 text-center">
@@ -107,26 +123,26 @@ export default function DirectoryExplorerPanel({
     <div className="flex h-full min-h-[320px] flex-col rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
       <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-3">
         <div className="flex items-center justify-between">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-            Current path
-          </p>
-          <p
-            className="mt-0.5 truncate font-mono text-xs text-slate-700"
-            title={path}
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              Current path
+            </p>
+            <p
+              className="mt-0.5 truncate font-mono text-xs text-slate-700"
+              title={path}
+            >
+              {path || "/"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => load()}
+            disabled={loading}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            aria-label="Refresh"
           >
-            {path || "/"}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => load()}
-          disabled={loading}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-          aria-label="Refresh"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-        </button>
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
         </div>
 
         <div className="mt-3 flex items-center gap-2">
@@ -140,6 +156,18 @@ export default function DirectoryExplorerPanel({
             />
           </div>
         </div>
+        {mode === "multiFolder" && (
+          <p className="mt-2 text-[11px] text-slate-500">
+            Marca las carpetas MAPA a incluir en el ZIP. Usa la flecha para entrar
+            en una carpeta.
+          </p>
+        )}
+        {mode === "pickGdb" && (
+          <p className="mt-2 text-[11px] text-slate-500">
+            Haz clic en un directorio <code className="font-mono">*.gdb</code>{" "}
+            para seleccionarlo.
+          </p>
+        )}
       </div>
 
       {error && (
@@ -164,20 +192,68 @@ export default function DirectoryExplorerPanel({
             {filteredEntries.map((e) => (
               <li key={e.path}>
                 {e.type === "folder" ? (
-                  <button
-                    type="button"
-                    className={rowCls}
-                    onClick={() => {
-                      setQuery("");
-                      onNavigateToFolder(e.path);
-                    }}
+                  <div
+                    className={`${rowCls} ${
+                      mode === "pickGdb" &&
+                      !e.name.toLowerCase().endsWith(".gdb")
+                        ? ""
+                        : ""
+                    }`}
                   >
-                    <Folder className="h-4 w-4 shrink-0 text-violet-500" />
-                    <span className="flex-1 truncate text-slate-800">
-                      {e.name}
-                    </span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
-                  </button>
+                    {mode === "multiFolder" && (
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 shrink-0 rounded border-slate-300 text-cyan-600"
+                        checked={selectedSet.has(e.path)}
+                        disabled={
+                          folderSelectableFilter
+                            ? !folderSelectableFilter(e)
+                            : false
+                        }
+                        onChange={() => onToggleFolderSelect?.(e.path)}
+                        title="Seleccionar carpeta"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      className={`flex min-w-0 flex-1 items-center gap-2 text-left ${
+                        mode === "multiFolder" &&
+                        folderSelectableFilter &&
+                        !folderSelectableFilter(e)
+                          ? "opacity-40"
+                          : ""
+                      }`}
+                      onClick={() => {
+                        if (mode === "pickGdb") {
+                          if (e.name.toLowerCase().endsWith(".gdb")) {
+                            onPickGdbFolder?.(e.path);
+                          } else {
+                            setQuery("");
+                            onNavigateToFolder(e.path);
+                          }
+                          return;
+                        }
+                        setQuery("");
+                        onNavigateToFolder(e.path);
+                      }}
+                    >
+                      <Folder className="h-4 w-4 shrink-0 text-violet-500" />
+                      <span className="flex-1 truncate text-slate-800">
+                        {e.name}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                      title="Entrar en carpeta"
+                      onClick={() => {
+                        setQuery("");
+                        onNavigateToFolder(e.path);
+                      }}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
                 ) : (
                   <div className={`${rowCls} cursor-default text-slate-600`}>
                     <File className="h-4 w-4 shrink-0 text-slate-400" />

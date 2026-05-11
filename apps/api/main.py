@@ -20,6 +20,7 @@ from modules.drilling.router import router as drilling_router
 from modules.jobs.router import router as jobs_router
 from modules.access_policies.router import router as access_policies_router
 from modules.volumes.router import router as volumes_router
+from modules.cartography.router import router as cartography_router
 
 # Importar modelos para que Alembic los detecte
 from modules.registry.models import AppModule, AppSection
@@ -64,6 +65,7 @@ app.include_router(drilling_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(access_policies_router, prefix="/api/v1")
 app.include_router(volumes_router, prefix="/api/v1")
+app.include_router(cartography_router, prefix="/api/v1")
 
 
 @app.get("/health")

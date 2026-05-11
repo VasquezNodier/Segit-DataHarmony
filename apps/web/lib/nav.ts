@@ -11,6 +11,7 @@ import {
   Shield,
   HardDrive,
   Play,
+  FileArchive,
   type LucideIcon,
 } from "lucide-react";
 
@@ -63,6 +64,8 @@ export const navigation: (NavItem | NavGroup)[] = [
     icon: Map,
     children: [
       { label: "Cartography", href: "/cartography", icon: Map },
+      { label: "Split by well", href: "/cartography/split", icon: Play },
+      { label: "ZIP pack", href: "/cartography/zip", icon: FileArchive },
       { label: "Projects Index", href: "/cartography/projects-index", icon: Map },
       { label: "Cultural Info", href: "/cartography/cultural-info", icon: Map },
     ],
