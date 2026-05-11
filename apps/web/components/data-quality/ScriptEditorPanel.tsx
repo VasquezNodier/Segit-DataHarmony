@@ -13,15 +13,24 @@ import {
 } from "lucide-react";
 import CodeEditor from "./CodeEditor";
 import type { DQScript } from "@/lib/api/data-quality";
-import { updateScriptContent } from "@/lib/api/data-quality";
+import type { DrillingScript } from "@/lib/api/drilling";
+import { updateScriptContent as defaultUpdateScriptContent } from "@/lib/api/data-quality";
 import type { ApiClientOptions } from "@/lib/api/client";
 
+type ScriptLike = DQScript | DrillingScript;
+
 interface ScriptEditorPanelProps {
-  script: DQScript | null;
+  script: ScriptLike | null;
   initialEditMode?: boolean;
   onClose: () => void;
   onSaved: (id: string, newContent: string) => void;
   apiOptions?: ApiClientOptions;
+  /** Si se omite, se usa el endpoint de Data Quality. */
+  updateScriptContent?: (
+    id: string,
+    content: string,
+    opts?: ApiClientOptions
+  ) => Promise<void>;
 }
 
 const LANGUAGE_CONFIG = {
@@ -51,6 +60,7 @@ export default function ScriptEditorPanel({
   onClose,
   onSaved,
   apiOptions = {},
+  updateScriptContent = defaultUpdateScriptContent,
 }: ScriptEditorPanelProps) {
   const [editing, setEditing] = useState(initialEditMode);
   const [content, setContent] = useState(script?.content ?? "");

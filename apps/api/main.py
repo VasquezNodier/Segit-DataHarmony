@@ -16,9 +16,11 @@ from modules.data_sources.router import router as data_sources_router
 from modules.data_quality.router import router as data_quality_router
 from modules.routines.router import router as routines_router
 from modules.geology_geophysics.router import router as geology_geophysics_router
+from modules.drilling.router import router as drilling_router
 from modules.jobs.router import router as jobs_router
 from modules.access_policies.router import router as access_policies_router
 from modules.volumes.router import router as volumes_router
+from modules.cartography.router import router as cartography_router
 
 # Importar modelos para que Alembic los detecte
 from modules.registry.models import AppModule, AppSection
@@ -59,9 +61,11 @@ app.include_router(data_sources_router, prefix="/api/v1")
 app.include_router(data_quality_router, prefix="/api/v1")
 app.include_router(routines_router, prefix="/api/v1")  # Alias legacy — conservar para compatibilidad
 app.include_router(geology_geophysics_router, prefix="/api/v1")
+app.include_router(drilling_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(access_policies_router, prefix="/api/v1")
 app.include_router(volumes_router, prefix="/api/v1")
+app.include_router(cartography_router, prefix="/api/v1")
 
 
 @app.get("/health")

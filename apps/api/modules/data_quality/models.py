@@ -10,6 +10,7 @@ from shared.base_model import Base, UUIDMixin, TimestampMixin
 
 MODULE_DATA_QUALITY = "data_quality"
 MODULE_GEOLOGY_GEOPHYSICS = "geology_geophysics"
+MODULE_DRILLING = "drilling"
 
 
 class AppScript(Base, UUIDMixin, TimestampMixin):
@@ -31,6 +32,7 @@ class AppApplication(Base, UUIDMixin, TimestampMixin):
     name = Column(String(256), nullable=False)
     description = Column(Text, default="", nullable=False)
     url = Column(String(2048), nullable=False)
+    port = Column(Integer, nullable=True)
     category = Column(String(128), default="General", nullable=False)
 
 

@@ -51,6 +51,14 @@ def get_application_by_id(db: Session, id: UUID, module: str = MODULE_DATA_QUALI
     return db.query(AppApplication).filter(AppApplication.id == id, AppApplication.module == module).first()
 
 
+def update_application(db: Session, a: AppApplication, **kwargs) -> AppApplication:
+    for key, value in kwargs.items():
+        setattr(a, key, value)
+    db.commit()
+    db.refresh(a)
+    return a
+
+
 def delete_application(db: Session, a: AppApplication) -> None:
     db.delete(a)
     db.commit()

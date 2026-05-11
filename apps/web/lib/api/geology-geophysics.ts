@@ -2,7 +2,7 @@
  * Cliente API para Geology & Geophysics (FastAPI /api/v1/gyg).
  *
  * Expone:
- *  - Rutinas operacionales
+ *  - Operational routines
  *  - Scripts de código (Python, Bash, SQL)
  *  - Aplicaciones externas
  *  - Documentación (markdown, links, archivos)

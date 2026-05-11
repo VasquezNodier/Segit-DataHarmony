@@ -31,6 +31,7 @@ class DQApplicationCreate(BaseModel):
     name: str
     description: str = ""
     url: str
+    port: int | None = Field(default=None, ge=1, le=65535)
     category: str = "General"
 
 
@@ -39,10 +40,21 @@ class DQApplicationResponse(BaseModel):
     name: str
     description: str
     url: str
+    port: int | None = None
     category: str
 
     class Config:
         from_attributes = True
+
+
+class DQApplicationUpdate(BaseModel):
+    """Actualización completa de aplicación (mismos campos que creación)."""
+
+    name: str
+    description: str = ""
+    url: str
+    port: int | None = Field(default=None, ge=1, le=65535)
+    category: str = "General"
 
 
 # Documents

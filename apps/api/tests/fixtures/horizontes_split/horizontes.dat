@@ -1,0 +1,8 @@
+! Legacy 3D horizons file — comment line removed by cleanup
+HorizonA
+   1.00000     2.00000     3.00000
+   4.00000     5.00000     6.00000
+
+HorizonB
+! inline commentaries like this one are dropped
+   7.00000     8.00000     9.00000
